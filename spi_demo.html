@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SPI 同步串行传输 可视化演示系统</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: "Consolas", "Microsoft YaHei", sans-serif; }
+body { background: #0d1117; color: #c9d1d9; padding: 20px; }
+.container { max-width: 1400px; margin: 0 auto; }
+h1 { font-size: 22px; margin-bottom: 20px; color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+
+.panel-row { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+.control-panel { flex: 0 0 320px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; }
+.control-group { margin-bottom: 16px; }
+.control-group label { display: block; font-size: 13px; color: #8b949e; margin-bottom: 6px; }
+.control-group select, .control-group .hex-input-wrap input {
+    width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 8px 10px; border-radius: 4px; font-size: 14px; outline: none;
+}
+.control-group select:focus, .control-group .hex-input-wrap input:focus { border-color: #58a6ff; }
+
+.hex-input-wrap { display: flex; align-items: center; border: 1px solid #30363d; border-radius: 4px; background: #0d1117; }
+.hex-input-wrap:focus-within { border-color: #58a6ff; }
+.hex-prefix {
+    padding: 0 8px 0 10px;
+    color: #79c0ff;
+    font-family: Consolas, monospace;
+    font-size: 14px;
+    user-select: none;
+}
+.hex-input-wrap input {
+    border: none !important;
+    border-radius: 0 4px 4px 0 !important;
+    flex: 1;
+    font-family: Consolas, monospace;
+    text-transform: uppercase;
+}
+
+.btn-group { display: flex; gap: 10px; margin-top: 20px; }
+.btn {
+    flex: 1; padding: 10px; border: none; border-radius: 4px; cursor: pointer;
+    font-size: 14px; font-weight: 500; transition: background 0.2s;
+}
+.btn-start { background: #238636; color: #fff; }
+.btn-start:hover { background: #2ea043; }
+.btn-reset { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+.btn-reset:hover { background: #30363d; }
+
+.waveform-container { flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; }
+.waveform-title { font-size: 15px; color: #58a6ff; margin-bottom: 10px; }
+#waveformCanvas { width: 100%; height: 420px; background: #0d1117; border-radius: 4px; }
+
+.waveform-note {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #30363d;
+    font-size: 12px;
+    color: #8b949e;
+    line-height: 1.8;
+    min-height: 160px;
+    display: flex;
+    align-items: center;
+}
+.waveform-note .note-title {
+    color: #c9d1d9;
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+.waveform-note ul { list-style: none; padding: 0; margin: 0; }
+.waveform-note li { margin-bottom: 2px; }
+.waveform-note b { color: #c9d1d9; font-weight: 500; }
+
+.status-panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 20px; }
+.status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.status-item .label { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.status-item .value { font-size: 18px; color: #79c0ff; font-family: Consolas, monospace; }
+
+.frame-info { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; }
+.frame-title { font-size: 15px; color: #58a6ff; margin-bottom: 12px; }
+.bit-list { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; align-items: stretch; }
+.bit-item {
+    min-width: 40px; padding: 6px 8px; text-align: center; border-radius: 4px;
+    font-size: 13px; font-family: Consolas, monospace; border: 1px solid #30363d;
+    background: #0d1117; display: flex; flex-direction: column; justify-content: center;
+}
+.bit-item.cs { color: #ff7b72; border-color: #f85149; }
+.bit-item.data { color: #79c0ff; border-color: #58a6ff; }
+.bit-item.active { background: #1f6feb; color: #fff; border-color: #58a6ff; }
+
+.decode-area { margin-top: 12px; padding-top: 12px; border-top: 1px solid #30363d; }
+.decode-row { display: flex; gap: 20px; font-size: 14px; flex-wrap: wrap; }
+.decode-row span { color: #8b949e; }
+.decode-row b { color: #c9d1d9; font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>SPI 同步串行传输 可视化演示系统</h1>
+
+    <div class="panel-row">
+        <div class="control-panel">
+            <div class="control-group">
+                <label>主机发送 MOSI (1字节, HEX)</label>
+                <div class="hex-input-wrap">
+                    <span class="hex-prefix">0x</span>
+                    <input type="text" id="mosiInput" value="55" maxlength="2" placeholder="00~FF">
+                </div>
+            </div>
+            <div class="control-group">
+                <label>从机返回 MISO (1字节, HEX)</label>
+                <div class="hex-input-wrap">
+                    <span class="hex-prefix">0x</span>
+                    <input type="text" id="misoInput" value="AA" maxlength="2" placeholder="00~FF">
+                </div>
+            </div>
+            <div class="control-group">
+                <label>SPI 模式 (CPOL / CPHA)</label>
+                <select id="spiMode">
+                    <option value="0" selected>模式0：CPOL=0, CPHA=0</option>
+                    <option value="1">模式1：CPOL=0, CPHA=1</option>
+                    <option value="2">模式2：CPOL=1, CPHA=0</option>
+                    <option value="3">模式3：CPOL=1, CPHA=1</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>数据位宽</label>
+                <select id="dataBits">
+                    <option value="8" selected>8 位</option>
+                    <option value="16">16 位</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>动画速度</label>
+                <select id="speedLevel">
+                    <option value="slow">低速</option>
+                    <option value="normal" selected>中速</option>
+                    <option value="fast">高速</option>
+                </select>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-start" id="startBtn">开始传输</button>
+                <button class="btn btn-reset" id="resetBtn">重置</button>
+            </div>
+        </div>
+
+        <div class="waveform-container">
+            <div class="waveform-title">SCLK / CS / MOSI / MISO 总线电平波形</div>
+            <canvas id="waveformCanvas"></canvas>
+            <div class="waveform-note">
+                <div>
+                    <div class="note-title"><b>标准帧结构说明</b></div>
+                    <ul>
+                        <li>• CS 片选：低电平有效，拉低启动传输，拉高结束传输</li>
+                        <li>• SCLK 时钟：由主机驱动，CPOL 决定空闲电平，CPHA 决定采样边沿</li>
+                        <li>• MOSI：主机输出、从机输入，数据方向 主机 → 从机</li>
+                        <li>• MISO：从机输出、主机输入，数据方向 从机 → 主机</li>
+                        <li>• 全双工：同一时钟沿下，MOSI 与 MISO 同时传输，双向独立</li>
+                        <li>• 数据位：MSB 高位优先，在一个边沿切换，另一个边沿采样</li>
+                        <li>• 模式0：CPOL=0 空闲低，CPHA=0 第一个边沿采样</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-panel">
+        <div class="status-grid">
+            <div class="status-item">
+                <div class="label">当前阶段</div>
+                <div class="value" id="statusStage">空闲</div>
+            </div>
+            <div class="status-item">
+                <div class="label">主机 MOSI</div>
+                <div class="value" id="statusMosi">0x55</div>
+            </div>
+            <div class="status-item">
+                <div class="label">从机 MISO</div>
+                <div class="value" id="statusMiso">0xAA</div>
+            </div>
+            <div class="status-item">
+                <div class="label">SPI 模式</div>
+                <div class="value" id="statusMode">模式0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="frame-info">
+        <div class="frame-title">帧结构位序列 (传输顺序: 左→右, MSB优先)</div>
+        <div class="bit-list" id="bitList"></div>
+        <div class="decode-area">
+            <div class="decode-row">
+                <span>MOSI 十六进制:</span> <b id="decMosiHex">0x55</b>
+                <span>MOSI 二进制:</span> <b id="decMosiBin">01010101</b>
+            </div>
+            <div class="decode-row" style="margin-top: 6px;">
+                <span>MISO 十六进制:</span> <b id="decMisoHex">0xAA</b>
+                <span>MISO 二进制:</span> <b id="decMisoBin">10101010</b>
+                <span>SPI模式:</span> <b id="decMode">CPOL=0, CPHA=0</b>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('waveformCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+}
+window.addEventListener('resize', () => {
+    resizeCanvas();
+    drawWaveform();
+});
+resizeCanvas();
+
+// 配置
+let config = {
+    mosiValue: 0x55,
+    misoValue: 0xAA,
+    spiMode: 0,
+    dataBits: 8,
+    speedLevel: 'normal'
+};
+
+const SPEED_MAP = {
+    slow: 120000,
+    normal: 70000,
+    fast: 30000
+};
+
+// 时序单位定义
+const TIMING = {
+    idlePre: 0.5,
+    csSetup: 0.5,
+    data: 8,
+    csHold: 0.5,
+    idlePost: 0.5
+};
+
+let animState = {
+    running: false,
+    totalProgress: 0,
+    lastTime: 0,
+    slowFactor: SPEED_MAP.normal
+};
+
+function getTotalUnits() {
+    return TIMING.idlePre + TIMING.csSetup + config.dataBits + TIMING.csHold + TIMING.idlePost;
+}
+
+function getSpiModeParams() {
+    const mode = parseInt(config.spiMode);
+    const cpol = mode >= 2 ? 1 : 0;
+    const cpha = mode % 2 === 1 ? 1 : 0;
+    return { cpol, cpha };
+}
+
+function getBitSequence() {
+    const seq = [];
+    seq.push({ type: 'cs', label: 'CS', value: '↓' });
+
+    for (let i = config.dataBits - 1; i >= 0; i--) {
+        const mosiBit = (config.mosiValue >> i) & 1;
+        const misoBit = (config.misoValue >> i) & 1;
+        seq.push({ type: 'data', label: `D${i}`, mosi: mosiBit, miso: misoBit });
+    }
+
+    seq.push({ type: 'cs', label: 'CS', value: '↑' });
+    return seq;
+}
+
+function updateStatusPanel() {
+    let stage = '空闲';
+    const p = animState.totalProgress;
+    const offset1 = TIMING.idlePre;
+    const offset2 = offset1 + TIMING.csSetup;
+    const offset3 = offset2 + config.dataBits;
+    const offset4 = offset3 + TIMING.csHold;
+
+    if (p >= offset1 && p < offset2) stage = '片选使能';
+    else if (p >= offset2 && p < offset3) stage = '数据传输';
+    else if (p >= offset3 && p < offset4) stage = '片选释放';
+
+    document.getElementById('statusStage').textContent = stage;
+    document.getElementById('statusMosi').textContent = '0x' + config.mosiValue.toString(16).toUpperCase().padStart(config.dataBits / 4, '0');
+    document.getElementById('statusMiso').textContent = '0x' + config.misoValue.toString(16).toUpperCase().padStart(config.dataBits / 4, '0');
+    document.getElementById('statusMode').textContent = `模式${config.spiMode}`;
+
+    document.getElementById('decMosiHex').textContent = '0x' + config.mosiValue.toString(16).toUpperCase().padStart(config.dataBits / 4, '0');
+    document.getElementById('decMosiBin').textContent = config.mosiValue.toString(2).padStart(config.dataBits, '0');
+    document.getElementById('decMisoHex').textContent = '0x' + config.misoValue.toString(16).toUpperCase().padStart(config.dataBits / 4, '0');
+    document.getElementById('decMisoBin').textContent = config.misoValue.toString(2).padStart(config.dataBits, '0');
+    const { cpol, cpha } = getSpiModeParams();
+    document.getElementById('decMode').textContent = `CPOL=${cpol}, CPHA=${cpha}`;
+}
+
+function renderBitList() {
+    const container = document.getElementById('bitList');
+    container.innerHTML = '';
+    const seq = getBitSequence();
+    const dataStartIdx = TIMING.idlePre + TIMING.csSetup;
+
+    seq.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = `bit-item ${item.type}`;
+
+        const bitPos = animState.totalProgress - dataStartIdx;
+        const activeIdx = Math.floor(bitPos);
+        if (animState.running && bitPos >= 0 && activeIdx === idx - 1 && item.type === 'data') {
+            div.classList.add('active');
+        }
+
+        if (item.type === 'cs') {
+            div.innerHTML = `${item.label}<br>${item.value}`;
+        } else {
+            div.innerHTML = `${item.label}<br>M:${item.mosi}<br>S:${item.miso}`;
+        }
+        container.appendChild(div);
+    });
+}
+
+// 获取指定位置的各信号电平
+function getSignalLevel(unitPos) {
+    const { cpol, cpha } = getSpiModeParams();
+    const totalUnits = getTotalUnits();
+
+    const idlePreEnd = TIMING.idlePre;
+    const csSetupEnd = idlePreEnd + TIMING.csSetup;
+    const dataEnd = csSetupEnd + config.dataBits;
+    const csHoldEnd = dataEnd + TIMING.csHold;
+
+    let sclk = cpol;
+    let cs = 1;
+    let mosi = 1;
+    let miso = 1;
+
+    if (unitPos < idlePreEnd) {
+        sclk = cpol; cs = 1; mosi = 1; miso = 1;
+    } else if (unitPos < csSetupEnd) {
+        sclk = cpol; cs = 0;
+        mosi = (config.mosiValue >> (config.dataBits - 1)) & 1;
+        miso = (config.misoValue >> (config.dataBits - 1)) & 1;
+    } else if (unitPos < dataEnd) {
+        cs = 0;
+        const bitIdx = Math.floor(unitPos - csSetupEnd);
+        const bitFrac = (unitPos - csSetupEnd) - bitIdx;
+        const mosiBit = (config.mosiValue >> (config.dataBits - 1 - bitIdx)) & 1;
+        const misoBit = (config.misoValue >> (config.dataBits - 1 - bitIdx)) & 1;
+
+        // SCLK 时钟电平
+        if (cpha === 0) {
+            sclk = bitFrac < 0.5 ? cpol : (1 - cpol);
+        } else {
+            sclk = bitFrac < 0.5 ? (1 - cpol) : cpol;
+        }
+
+        mosi = mosiBit;
+        miso = misoBit;
+    } else if (unitPos < csHoldEnd) {
+        sclk = cpol; cs = 1; mosi = 1; miso = 1;
+    } else {
+        sclk = cpol; cs = 1; mosi = 1; miso = 1;
+    }
+
+    return { sclk, cs, mosi, miso };
+}
+
+function drawWaveform() {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    const paddingLeft = 60;
+    const paddingRight = 20;
+    const paddingY = 20;
+    const signalCount = 4;
+    const signalGap = (h - 2 * paddingY) / signalCount;
+
+    const sclkHigh = paddingY;
+    const sclkLow = paddingY + signalGap - paddingY;
+    const csHigh = paddingY + signalGap;
+    const csLow = paddingY + signalGap * 2 - paddingY;
+    const mosiHigh = paddingY + signalGap * 2;
+    const mosiLow = paddingY + signalGap * 3 - paddingY;
+    const misoHigh = paddingY + signalGap * 3;
+    const misoLow = h - paddingY;
+
+    // 基准线
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, sclkHigh); ctx.lineTo(w - paddingRight, sclkHigh);
+    ctx.moveTo(paddingLeft, sclkLow);  ctx.lineTo(w - paddingRight, sclkLow);
+    ctx.moveTo(paddingLeft, csHigh);   ctx.lineTo(w - paddingRight, csHigh);
+    ctx.moveTo(paddingLeft, csLow);    ctx.lineTo(w - paddingRight, csLow);
+    ctx.moveTo(paddingLeft, mosiHigh); ctx.lineTo(w - paddingRight, mosiHigh);
+    ctx.moveTo(paddingLeft, mosiLow);  ctx.lineTo(w - paddingRight, mosiLow);
+    ctx.moveTo(paddingLeft, misoHigh); ctx.lineTo(w - paddingRight, misoHigh);
+    ctx.moveTo(paddingLeft, misoLow);  ctx.lineTo(w - paddingRight, misoLow);
+    ctx.stroke();
+
+    // 信号标签
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '12px Consolas';
+    ctx.textAlign = 'right';
+    ctx.fillText('SCLK', paddingLeft - 10, (sclkHigh + sclkLow) / 2 + 4);
+    ctx.fillText('CS',   paddingLeft - 10, (csHigh + csLow) / 2 + 4);
+    ctx.fillText('MOSI', paddingLeft - 10, (mosiHigh + mosiLow) / 2 + 4);
+    ctx.fillText('MISO', paddingLeft - 10, (misoHigh + misoLow) / 2 + 4);
+
+    const totalUnits = getTotalUnits();
+    const drawWidth = w - paddingLeft - paddingRight;
+    const unitWidth = drawWidth / totalUnits;
+    const currentUnit = Math.min(animState.totalProgress, totalUnits);
+    const currentX = paddingLeft + unitWidth * currentUnit;
+
+    // 绘制单条波形的通用函数
+    function drawSignal(signalName, getY, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let prevLevel = getSignalLevel(0)[signalName];
+        let prevY = getY(prevLevel);
+        ctx.moveTo(paddingLeft, prevY);
+
+        const step = 0.01;
+        for (let u = 0; u <= currentUnit; u += step) {
+            const level = getSignalLevel(u)[signalName];
+            const y = getY(level);
+            if (level !== prevLevel) {
+                ctx.lineTo(paddingLeft + unitWidth * u, prevY);
+                ctx.lineTo(paddingLeft + unitWidth * u, y);
+                prevLevel = level;
+                prevY = y;
+            } else {
+                ctx.lineTo(paddingLeft + unitWidth * u, y);
+            }
+        }
+        ctx.stroke();
+    }
+
+    drawSignal('sclk', function(level) { return level === 1 ? sclkHigh : sclkLow; }, '#58a6ff');
+    drawSignal('cs',   function(level) { return level === 1 ? csHigh : csLow; },     '#f85149');
+    drawSignal('mosi', function(level) { return level === 1 ? mosiHigh : mosiLow; }, '#2ea043');
+    drawSignal('miso', function(level) { return level === 1 ? misoHigh : misoLow; }, '#bc8cff');
+
+    // 位分隔虚线：贯穿四路信号
+    ctx.strokeStyle = '#30363d';
+    ctx.setLineDash([2, 2]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const dataStartUnit = TIMING.idlePre + TIMING.csSetup;
+    for (let i = 0; i <= config.dataBits; i++) {
+        const x = paddingLeft + unitWidth * (dataStartUnit + i);
+        if (x <= currentX) {
+            ctx.moveTo(x, sclkHigh - 5);
+            ctx.lineTo(x, misoLow + 5);
+        }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 传输光标
+    if (animState.running || animState.totalProgress > 0) {
+        ctx.strokeStyle = '#f85149';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(currentX, sclkHigh - 10);
+        ctx.lineTo(currentX, misoLow + 10);
+        ctx.stroke();
+
+        ctx.fillStyle = '#f85149';
+        ctx.beginPath();
+        ctx.moveTo(currentX, sclkHigh - 10);
+        ctx.lineTo(currentX - 4, sclkHigh - 17);
+        ctx.lineTo(currentX + 4, sclkHigh - 17);
+        ctx.fill();
+    }
+
+    // 位标签
+    ctx.font = '11px Consolas';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < config.dataBits; i++) {
+        const cx = paddingLeft + unitWidth * (dataStartUnit + i + 0.5);
+        ctx.fillStyle = '#79c0ff';
+        ctx.fillText(`D${config.dataBits - 1 - i}`, cx, misoLow + 28);
+    }
+}
+
+function animate(timestamp) {
+    if (!animState.running) return;
+
+    if (!animState.lastTime) animState.lastTime = timestamp;
+    const delta = timestamp - animState.lastTime;
+    animState.lastTime = timestamp;
+
+    const unitTimeMs = (1 / 100000) * 1000 * animState.slowFactor;
+    const progressDelta = delta / unitTimeMs;
+
+    animState.totalProgress += progressDelta;
+    const totalMax = getTotalUnits();
+
+    if (animState.totalProgress >= totalMax) {
+        animState.totalProgress = totalMax;
+        animState.running = false;
+    }
+
+    drawWaveform();
+    renderBitList();
+    updateStatusPanel();
+
+    if (animState.running) {
+        requestAnimationFrame(animate);
+    }
+}
+
+function readConfig() {
+    const maxVal = config.dataBits === 8 ? 255 : 65535;
+
+    let mosiVal = parseInt(document.getElementById('mosiInput').value.trim(), 16);
+    if (isNaN(mosiVal) || mosiVal < 0 || mosiVal > maxVal) {
+        mosiVal = 0x55;
+        document.getElementById('mosiInput').value = '55';
+    }
+
+    let misoVal = parseInt(document.getElementById('misoInput').value.trim(), 16);
+    if (isNaN(misoVal) || misoVal < 0 || misoVal > maxVal) {
+        misoVal = 0xAA;
+        document.getElementById('misoInput').value = 'AA';
+    }
+
+    config.mosiValue = mosiVal;
+    config.misoValue = misoVal;
+    config.spiMode = document.getElementById('spiMode').value;
+    config.dataBits = parseInt(document.getElementById('dataBits').value);
+    config.speedLevel = document.getElementById('speedLevel').value;
+    animState.slowFactor = SPEED_MAP[config.speedLevel];
+}
+
+function startTransmission() {
+    readConfig();
+    animState.totalProgress = 0;
+    animState.lastTime = 0;
+    animState.running = true;
+
+    updateStatusPanel();
+    renderBitList();
+    requestAnimationFrame(animate);
+}
+
+function resetDemo() {
+    animState.running = false;
+    animState.totalProgress = 0;
+    readConfig();
+    updateStatusPanel();
+    renderBitList();
+    drawWaveform();
+}
+
+document.getElementById('startBtn').addEventListener('click', startTransmission);
+document.getElementById('resetBtn').addEventListener('click', resetDemo);
+
+['mosiInput', 'misoInput', 'spiMode', 'dataBits', 'speedLevel'].forEach(id => {
+    document.getElementById(id).addEventListener('change', resetDemo);
+});
+
+['mosiInput', 'misoInput'].forEach(id => {
+    document.getElementById(id).addEventListener('input', (e) => {
+        e.target.value = e.target.value.toUpperCase().replace(/[^0-9A-F]/g, '');
+    });
+});
+
+resetDemo();
+</script>
+</body>
+</html>
+<!-- （注：内容由AI生成） -->
